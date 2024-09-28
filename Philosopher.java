@@ -1,85 +1,81 @@
 import java.util.Random;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.Lock;
 
 public class Philosopher extends Thread {
-    private final String name;        // Name of the philosopher (e.g., "A", "B", etc.)
-    private final Fork leftFork;      // Fork to the left of the philosopher
-    private final Fork rightFork;     // Fork to the right of the philosopher
-    private final Table table;        // The table to which the philosopher belongs
-    private volatile boolean movedToSixthTable = false;  // Indicates if the philosopher has moved to the sixth table due to deadlock
+    private String name;
+    private Lock leftFork;
+    private Lock rightFork;
+    private int tableId;
+    private boolean eating = false;
+    private TableManager tableManager;
 
-    // Constructor to initialize the philosopher with a name, left fork, right fork, and their table
-    public Philosopher(String name, Fork leftFork, Fork rightFork, Table table) {
+    public Philosopher(String name, Lock leftFork, Lock rightFork, int tableId, TableManager tableManager) {
         this.name = name;
         this.leftFork = leftFork;
         this.rightFork = rightFork;
-        this.table = table;
+        this.tableId = tableId;
+        this.tableManager = tableManager;
     }
 
-    // This method is the entry point for the philosopher thread (called when the thread starts)
+    private void think() throws InterruptedException {
+        int thinkTime = new Random().nextInt(10) * 1000; // 0 to 10 seconds
+        System.out.println(name + " is thinking.");
+        Thread.sleep(thinkTime);
+    }
+
+    private void eat() throws InterruptedException {
+        int eatTime = new Random().nextInt(5) * 1000; // 0 to 5 seconds
+        System.out.println(name + " is eating.");
+        Thread.sleep(eatTime);
+    }
+
     @Override
     public void run() {
         try {
-            // The philosopher will continue thinking, trying to pick forks, and eating until moved to the sixth table
-            while (!movedToSixthTable) {
-                think();  // Simulate thinking
-                pickForksAndEat();  // Try to pick up forks and eat
+            while (true) {
+                think();
+
+                // Try to pick up left fork
+                if (leftFork.tryLock()) {
+                    try {
+                        System.out.println(name + " picked up the left fork.");
+                        Thread.sleep(4000); // Wait 4 seconds before trying the right fork
+
+                        // Try to pick up right fork
+                        if (rightFork.tryLock()) {
+                            try {
+                                System.out.println(name + " picked up the right fork and is now eating.");
+                                eating = true;
+                                eat();
+                                eating = false;
+                            } finally {
+                                rightFork.unlock();
+                            }
+                        } else {
+                            System.out.println(name + " couldn't pick up the right fork.");
+                        }
+                    } finally {
+                        leftFork.unlock();
+                    }
+                } else {
+                    System.out.println(name + " couldn't pick up the left fork.");
+                }
+
+                // Check for deadlock and handle moving to the sixth table
+                if (tableManager.detectDeadlock(tableId)) {
+                    tableManager.movePhilosopherToSixthTable(this);
+                    return;
+                }
             }
         } catch (InterruptedException e) {
-            // Handle the thread interruption (if any) safely
-            Thread.currentThread().interrupt();
+            e.printStackTrace();
         }
     }
 
-    // Simulate the thinking process
-    private void think() throws InterruptedException {
-        System.out.println(name + " is thinking.");
-        // Random thinking time between 0 and 10 seconds
-        TimeUnit.SECONDS.sleep(new Random().nextInt(10));
+    public boolean isEating() {
+        return eating;
     }
 
-    // Try to pick up forks and eat if successful
-    private void pickForksAndEat() throws InterruptedException {
-        // Attempt to pick up the left fork
-        boolean leftForkPicked = leftFork.pickUp();
-        if (leftForkPicked) {
-            System.out.println(name + " picked up the left fork.");
-            // Wait for 4 seconds before attempting to pick up the right fork
-            TimeUnit.SECONDS.sleep(4);
-
-            // Attempt to pick up the right fork
-            boolean rightForkPicked = rightFork.pickUp();
-            if (rightForkPicked) {
-                System.out.println(name + " picked up the right fork and starts eating.");
-                // Simulate the eating process
-                eat();
-                // After eating, put down the right fork
-                rightFork.putDown();
-                System.out.println(name + " put down the right fork.");
-            }
-            // After attempting to eat, put down the left fork
-            leftFork.putDown();
-            System.out.println(name + " put down the left fork.");
-        } else {
-            System.out.println(name + " couldn't pick up the left fork and is waiting.");
-        }
-
-        // After attempting to eat or failing, check for deadlock at the current table
-        table.checkForDeadlock(this);
-    }
-
-    // Simulate the eating process
-    private void eat() throws InterruptedException {
-        // Random eating time between 0 and 5 seconds
-        TimeUnit.SECONDS.sleep(new Random().nextInt(5));
-    }
-
-    // Mark the philosopher as moved to the sixth table in case of deadlock
-    public void moveToSixthTable() {
-        this.movedToSixthTable = true;  // Philosopher moves to the sixth table
-    }
-
-    // Get the name of the philosopher (used for logging and deadlock detection)
     public String getPhilosopherName() {
         return name;
     }
